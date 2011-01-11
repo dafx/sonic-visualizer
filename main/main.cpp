@@ -220,6 +220,8 @@ protected:
 int
 main(int argc, char **argv)
 {
+    svSystemSpecificInitialisation();
+
 #ifdef Q_WS_X11
 #if QT_VERSION >= 0x040500
 //    QApplication::setGraphicsSystem("raster");
@@ -237,8 +239,6 @@ main(int argc, char **argv)
     signal(SIGHUP,  signalHandler);
     signal(SIGQUIT, signalHandler);
 #endif
-
-    svSystemSpecificInitialisation();
 
     bool audioOutput = true;
     bool oscSupport = true;
@@ -335,9 +335,9 @@ main(int argc, char **argv)
     QDesktopWidget *desktop = QApplication::desktop();
     QRect available = desktop->availableGeometry();
 
-    int width = available.width() * 2 / 3;
+    int width = (available.width() * 2) / 3;
     int height = available.height() / 2;
-    if (height < 450) height = available.height() * 2 / 3;
+    if (height < 450) height = (available.height() * 2) / 3;
     if (width > height * 2) width = height * 2;
 
     settings.beginGroup("MainWindow");
