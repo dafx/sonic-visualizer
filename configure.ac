@@ -1,5 +1,5 @@
 
-AC_INIT([Sonic Visualiser], 1.8, cannam@all-day-breakfast.com)
+AC_INIT([Sonic Visualiser], 1.9-hg, cannam@all-day-breakfast.com)
 
 AC_CONFIG_SRCDIR(main/main.cpp)
 
@@ -10,6 +10,13 @@ AC_CONFIG_SRCDIR(main/main.cpp)
 # setting now and restore it after Autoconf has done its bit of
 # piddling about.
 USER_CXXFLAGS="$CXXFLAGS"
+
+# If the user supplied CFLAGS but not CXXFLAGS, use CFLAGS instead
+if test x"$USER_CXXFLAGS" = x; then
+   if test x"$CFLAGS" != x; then
+      USER_CXXFLAGS="$CFLAGS"
+   fi
+fi
 
 AC_LANG_CPLUSPLUS
 
