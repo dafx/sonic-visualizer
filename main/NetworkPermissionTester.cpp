@@ -54,12 +54,12 @@ NetworkPermissionTester::havePermission()
 	      "<h2>Welcome to Sonic Visualiser!</h2>"
 	      "<p><img src=\":icons/qm-logo-smaller.png\" style=\"float:right\">Sonic Visualiser is a program for viewing and exploring audio data for semantic music analysis and annotation.</p>"
 	      "<p>Developed in the Centre for Digital Music at Queen Mary, University of London, Sonic Visualiser is provided free as open source software under the GNU General Public License.</p>"
+              "<p><b>This is an experimental release of Sonic Visualiser with support for import and export of IM-AF encoded multitrack files.</b><br>It is not a standard Sonic Visualiser release.</p>"
               "<p><hr></p>"
 	      "<p><b>Before we go on...</b></p>"
 	      "<p>Sonic Visualiser needs to make occasional network requests to our servers.</p>"
 	      "<p>This is to:</p>"
-	      "<ul><li> look up information about available and installed plugins; and</li>"
-	      "<li> tell you when updates are available.</li></ul>"
+	      "<ul><li> look up information about available and installed plugins.</li></ul>"
 	      "<p>No personal information will be sent, no tracking is carried out, and all requests happen in the background without interrupting your work.</p>"
 	      "<p>We recommend that you allow this, because it makes Sonic Visualiser more useful. But if you do not wish to do so, please un-check the box below.<br></p>"));
 	layout->addWidget(label, 0, 0);
