@@ -354,6 +354,17 @@ void
 MainWindow::setupMenus()
 {
     if (!m_mainMenusCreated) {
+
+#ifdef Q_OS_LINUX
+        // In Ubuntu 14.04 the window's menu bar goes missing entirely
+        // if the user is running any desktop environment other than Unity
+        // (in which the faux single-menubar appears). The user has a
+        // workaround, to remove the appmenu-qt5 package, but that is
+        // awkward and the problem is so severe that it merits disabling
+        // the system menubar integration altogether. Like this:
+	menuBar()->setNativeMenuBar(false);  // fix #1039
+#endif
+
         m_rightButtonMenu = new QMenu();
 
         // No -- we don't want tear-off enabled on the right-button
@@ -758,7 +769,7 @@ MainWindow::setupEditMenu()
     menu->addAction(action);
 
     action = new QAction(tr("Insert Item at Selection"), this);
-    action->setShortcut(tr("Ctrl+Shift+Enter"));
+    action->setShortcut(tr("Ctrl+Shift+Return"));
     action->setStatusTip(tr("Insert a new note or region item corresponding to the current selection"));
     connect(action, SIGNAL(triggered()), this, SLOT(insertItemAtSelection()));
     connect(this, SIGNAL(canInsertItemAtSelection(bool)), action, SLOT(setEnabled(bool)));
@@ -1404,7 +1415,6 @@ MainWindow::setupPaneAndLayerMenus()
 
     setupExistingLayersMenus();
 
-/*!!! These don't work correctly -- fix or omit
     menu->addSeparator();
 
     action = new QAction(tr("Switch to Previous Layer"), this);
@@ -1422,7 +1432,7 @@ MainWindow::setupPaneAndLayerMenus()
     connect(this, SIGNAL(canSelectNextLayer(bool)), action, SLOT(setEnabled(bool)));
     m_keyReference->registerShortcut(action);
     menu->addAction(action);
-*/
+
     m_rightButtonLayerMenu->addSeparator();
     menu->addSeparator();
 
@@ -2559,8 +2569,6 @@ MainWindow::exportAudio(bool asData)
 
     } else if (selections.size() > 1) {
 
-        bool multiple = false;
-
         if (!asData) { // Multi-file export not supported for data
 
             QStringList items;
@@ -2977,7 +2985,7 @@ MainWindow::openSomething()
 
     if (path.isEmpty()) return;
 
-    FileOpenStatus status = open(path, ReplaceSession);
+    FileOpenStatus status = openPath(path, ReplaceSession);
 
     if (status == FileOpenFailed) {
         emit hideSplash();
@@ -3009,7 +3017,7 @@ MainWindow::openLocation()
 
     if (text.isEmpty()) return;
 
-    FileOpenStatus status = open(text, AskUser);
+    FileOpenStatus status = openPath(text, AskUser);
 
     if (status == FileOpenFailed) {
         emit hideSplash();
@@ -3037,7 +3045,7 @@ MainWindow::openRecentFile()
     QString path = action->text();
     if (path == "") return;
 
-    FileOpenStatus status = open(path, ReplaceSession);
+    FileOpenStatus status = openPath(path, ReplaceSession);
 
     if (status == FileOpenFailed) {
         emit hideSplash();
@@ -3165,9 +3173,9 @@ MainWindow::paneDropAccepted(Pane *pane, QStringList uriList)
         FileOpenStatus status;
 
         if (i == uriList.begin()) {
-            status = open(*i, ReplaceCurrentPane);
+            status = openPath(*i, ReplaceCurrentPane);
         } else {
-            status = open(*i, CreateAdditionalModel);
+            status = openPath(*i, CreateAdditionalModel);
         }
 
         if (status == FileOpenFailed) {
@@ -3649,7 +3657,7 @@ MainWindow::addLayer()
                     cerr << "WARNING: MainWindow::addLayer: unknown model "
                               << model
                               << " (\""
-                              << (model ? model->objectName() : "")
+                              << model->objectName()
                               << "\") in layer action map"
                               << endl;
                 }
@@ -4063,12 +4071,21 @@ MainWindow::midiEventsAvailable()
     NoteLayer *currentNoteLayer = 0;
     TimeValueLayer *currentTimeValueLayer = 0;
 
-    if (m_paneStack) currentPane = m_paneStack->getCurrentPane();
+    if (m_paneStack) {
+        currentPane = m_paneStack->getCurrentPane();
+    }
+
     if (currentPane) {
         currentNoteLayer = dynamic_cast<NoteLayer *>
             (currentPane->getSelectedLayer());
         currentTimeValueLayer = dynamic_cast<TimeValueLayer *>
             (currentPane->getSelectedLayer());
+    } else {
+        // discard these events
+        while (m_midiInput->getEventsAvailable() > 0) {
+            (void)m_midiInput->readEvent();
+        }
+        return;
     }
 
     // This is called through a serialised signal/slot invocation
@@ -4125,9 +4142,13 @@ MainWindow::midiEventsAvailable()
                     (tvm, point, tr("Add Point"));
                 CommandHistory::getInstance()->addCommand(command);
             }
-            continue;
 
+            continue;
         }
+
+        // This is reached only if !currentNoteLayer and
+        // !currentTimeValueLayer, i.e. there is some other sort of
+        // layer that may be insertable-into
 
         if (!noteOn) continue;
         insertInstantAt(ev.getTime());
