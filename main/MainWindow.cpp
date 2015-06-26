@@ -24,6 +24,7 @@
 #include "data/model/SparseOneDimensionalModel.h"
 #include "data/model/RangeSummarisableTimeValueModel.h"
 #include "data/model/NoteModel.h"
+#include "data/model/AggregateWaveModel.h"
 #include "data/model/Labeller.h"
 #include "data/osc/OSCQueue.h"
 #include "framework/Document.h"
@@ -55,6 +56,7 @@
 #include "widgets/TransformFinder.h"
 #include "widgets/LabelCounterInputDialog.h"
 #include "widgets/ActivityLog.h"
+#include "widgets/UnitConverter.h"
 #include "audioio/AudioCallbackPlaySource.h"
 #include "audioio/AudioCallbackPlayTarget.h"
 #include "audioio/AudioTargetFactory.h"
@@ -66,7 +68,6 @@
 #include "data/fileio/MIDIFileWriter.h"
 #include "data/fileio/BZipFileDevice.h"
 #include "data/fileio/FileSource.h"
-#include "data/fft/FFTDataServer.h"
 #include "data/midi/MIDIInput.h"
 #include "base/RecentFiles.h"
 #include "transform/TransformFactory.h"
@@ -106,6 +107,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QTextStream>
+#include <QTextCodec>
 #include <QProcess>
 #include <QShortcut>
 #include <QSettings>
@@ -161,6 +163,7 @@ MainWindow::MainWindow(bool withAudioOutput, bool withOSCSupport) :
     m_preferencesDialog(0),
     m_layerTreeDialog(0),
     m_activityLog(new ActivityLog()),
+    m_unitConverter(new UnitConverter()),
     m_keyReference(new KeyReference()),
     m_templateWatcher(0)
 {
@@ -296,6 +299,8 @@ MainWindow::MainWindow(bool withAudioOutput, bool withOSCSupport) :
     connect(this, SIGNAL(replacedDocument()), this, SLOT(documentReplaced()));
     m_activityLog->hide();
 
+    m_unitConverter->hide();
+    
     newSession();
 
     connect(m_midiInput, SIGNAL(eventsAvailable()),
@@ -325,6 +330,7 @@ MainWindow::~MainWindow()
 //    SVDEBUG << "MainWindow::~MainWindow" << endl;
     delete m_keyReference;
     delete m_activityLog;
+    delete m_unitConverter;
     delete m_preferencesDialog;
     delete m_layerTreeDialog;
     delete m_versionTester;
@@ -452,7 +458,6 @@ MainWindow::setupFileMenu()
     IconLoader il;
 
     QIcon icon = il.load("filenew");
-    icon.addPixmap(il.loadPixmap("filenew-22"));
     QAction *action = new QAction(icon, tr("&New Session"), this);
     action->setShortcut(tr("Ctrl+N"));
     action->setStatusTip(tr("Abandon the current %1 session and start a new one").arg(QApplication::applicationName()));
@@ -462,7 +467,6 @@ MainWindow::setupFileMenu()
     toolbar->addAction(action);
 
     icon = il.load("fileopen");
-    icon.addPixmap(il.loadPixmap("fileopen-22"));
     action = new QAction(icon, tr("&Open..."), this);
     action->setShortcut(tr("Ctrl+O"));
     action->setStatusTip(tr("Open a session file, audio file, or layer"));
@@ -503,7 +507,6 @@ MainWindow::setupFileMenu()
     menu->addSeparator();
 
     icon = il.load("filesave");
-    icon.addPixmap(il.loadPixmap("filesave-22"));
     action = new QAction(icon, tr("&Save Session"), this);
     action->setShortcut(tr("Ctrl+S"));
     action->setStatusTip(tr("Save the current session into a %1 session file").arg(QApplication::applicationName()));
@@ -514,7 +517,6 @@ MainWindow::setupFileMenu()
     toolbar->addAction(action);
 	
     icon = il.load("filesaveas");
-    icon.addPixmap(il.loadPixmap("filesaveas-22"));
     action = new QAction(icon, tr("Save Session &As..."), this);
     action->setShortcut(tr("Ctrl+Shift+S"));
     action->setStatusTip(tr("Save the current session into a new %1 session file").arg(QApplication::applicationName()));
@@ -562,10 +564,12 @@ MainWindow::setupFileMenu()
     m_keyReference->registerShortcut(action);
     menu->addAction(action);
 
-    action = new QAction(tr("Export Annotation Layer..."), this);
+    action = new QAction(tr("Export Annotation La&yer..."), this);
+    action->setShortcut(tr("Ctrl+Y"));
     action->setStatusTip(tr("Export layer data to a file"));
     connect(action, SIGNAL(triggered()), this, SLOT(exportLayer()));
     connect(this, SIGNAL(canExportLayer(bool)), action, SLOT(setEnabled(bool)));
+    m_keyReference->registerShortcut(action);
     menu->addAction(action);
 
     menu->addSeparator();
@@ -1023,6 +1027,11 @@ MainWindow::setupViewMenu()
     action = new QAction(tr("Show Acti&vity Log"), this);
     action->setStatusTip(tr("Open a window listing interactions and other events"));
     connect(action, SIGNAL(triggered()), this, SLOT(showActivityLog()));
+    menu->addAction(action);
+
+    action = new QAction(tr("Show &Unit Converter"), this);
+    action->setStatusTip(tr("Open a window of pitch and timing conversion utilities"));
+    connect(action, SIGNAL(triggered()), this, SLOT(showUnitConverter()));
     menu->addAction(action);
 
     menu->addSeparator();
@@ -2330,8 +2339,8 @@ MainWindow::updateDescriptionLabel()
 
     QString description;
 
-    int ssr = getMainModel()->getSampleRate();
-    int tsr = ssr;
+    sv_samplerate_t ssr = getMainModel()->getSampleRate();
+    sv_samplerate_t tsr = ssr;
     if (m_playSource) tsr = m_playSource->getTargetSampleRate();
 
     if (ssr != tsr) {
@@ -2715,6 +2724,7 @@ MainWindow::exportLayer()
             error = tr("Failed to open file %1 for writing").arg(path);
         } else {
             QTextStream out(&file);
+            out.setCodec(QTextCodec::codecForName("UTF-8"));
             out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                 << "<!DOCTYPE sonic-visualiser>\n"
                 << "<sv>\n"
@@ -2795,7 +2805,7 @@ MainWindow::exportImage()
     visible = pane->getImageSize(pane->getFirstVisibleFrame(),
                                  pane->getLastVisibleFrame());
 
-    int sf0 = 0, sf1 = 0;
+    sv_frame_t sf0 = 0, sf1 = 0;
  
     if (haveSelection) {
         MultiSelection::SelectionList selections = m_viewManager->getSelections();
@@ -2942,6 +2952,7 @@ MainWindow::closeSession()
     delete m_preferencesDialog.data();
 
     m_activityLog->hide();
+    m_unitConverter->hide();
     m_keyReference->hide();
 
     delete m_document;
@@ -3388,7 +3399,7 @@ MainWindow::saveSessionAs()
 	QMessageBox::critical(this, tr("Failed to save file"),
 			      tr("<b>Save failed</b><p>Session file \"%1\" could not be saved.").arg(path));
     } else {
-	setWindowTitle(tr("%1: %1")
+	setWindowTitle(tr("%1: %2")
                        .arg(QApplication::applicationName())
 		       .arg(QFileInfo(path).fileName()));
 	m_sessionFile = path;
@@ -3694,25 +3705,49 @@ MainWindow::addLayer(QString transformId)
         m_document->getTransformInputModels();
 
     Model *defaultInputModel = 0;
+
     for (int j = 0; j < pane->getLayerCount(); ++j) {
+
         Layer *layer = pane->getLayer(j);
         if (!layer) continue;
+
         if (LayerFactory::getInstance()->getLayerType(layer) !=
             LayerFactory::Waveform &&
             !layer->isLayerOpaque()) continue;
+
         Model *model = layer->getModel();
         if (!model) continue;
+
         for (size_t k = 0; k < candidateInputModels.size(); ++k) {
             if (candidateInputModels[k] == model) {
                 defaultInputModel = model;
                 break;
             }
         }
+
         if (defaultInputModel) break;
     }
+
+    if (candidateInputModels.size() > 1) {
+        // Add an aggregate model as another option
+        AggregateWaveModel::ChannelSpecList sl;
+        foreach (Model *m, candidateInputModels) {
+            RangeSummarisableTimeValueModel *r =
+                qobject_cast<RangeSummarisableTimeValueModel *>(m);
+            if (r) {
+                sl.push_back(AggregateWaveModel::ModelChannelSpec(r, -1));
+            }
+        }
+        if (!sl.empty()) {
+            AggregateWaveModel *aggregate = new AggregateWaveModel(sl);
+            aggregate->setObjectName(tr("Multiplex all of the above"));
+            candidateInputModels.push_back(aggregate);
+            //!!! but it leaks
+        }
+    }
     
-    int startFrame = 0, duration = 0;
-    int endFrame = 0;
+    sv_frame_t startFrame = 0, duration = 0;
+    sv_frame_t endFrame = 0;
     m_viewManager->getSelection().getExtents(startFrame, endFrame);
     if (endFrame > startFrame) duration = endFrame - startFrame;
     else startFrame = 0;
@@ -3836,14 +3871,14 @@ MainWindow::playSpeedChanged(int position)
 {
     PlaySpeedRangeMapper mapper(0, 200);
 
-    float percent = m_playSpeed->mappedValue();
-    float factor = mapper.getFactorForValue(percent);
+    double percent = m_playSpeed->mappedValue();
+    double factor = mapper.getFactorForValue(percent);
 
 //    cerr << "speed = " << position << " percent = " << percent << " factor = " << factor << endl;
 
     bool something = (position != 100);
 
-    int pc = lrintf(percent);
+    int pc = int(lrint(percent));
 
     if (!something) {
         contextHelpChanged(tr("Playback speed: Normal"));
@@ -3934,7 +3969,7 @@ MainWindow::updateVisibleRangeDisplay(Pane *p) const
     }
 
     bool haveSelection = false;
-    int startFrame = 0, endFrame = 0;
+    sv_frame_t startFrame = 0, endFrame = 0;
 
     if (m_viewManager && m_viewManager->haveInProgressSelection()) {
 
@@ -3987,7 +4022,7 @@ MainWindow::updatePositionStatusDisplays() const
     if (!statusBar()->isVisible()) return;
 
     Pane *pane = 0;
-    int frame = m_viewManager->getPlaybackFrame();
+    sv_frame_t frame = m_viewManager->getPlaybackFrame();
 
     if (m_paneStack) pane = m_paneStack->getCurrentPane();
     if (!pane) return;
@@ -4014,7 +4049,8 @@ MainWindow::outputLevelsChanged(float left, float right)
 }
 
 void
-MainWindow::sampleRateMismatch(int requested, int actual,
+MainWindow::sampleRateMismatch(sv_samplerate_t requested,
+                               sv_samplerate_t actual,
                                bool willResample)
 {
     if (!willResample) {
@@ -4080,7 +4116,7 @@ MainWindow::midiEventsAvailable()
 
         MIDIEvent ev(m_midiInput->readEvent());
 
-        int frame = currentPane->alignFromReference(ev.getTime());
+        sv_frame_t frame = currentPane->alignFromReference(ev.getTime());
 
         bool noteOn = (ev.getMessageType() == MIDIConstants::MIDI_NOTE_ON &&
                        ev.getVelocity() > 0);
@@ -4255,20 +4291,25 @@ MainWindow::modelGenerationFailed(QString transformName, QString message)
 {
     emit hideSplash();
 
+    QString quoted;
+    if (transformName != "") {
+        quoted = QString("\"%1\" ").arg(transformName);
+    }
+    
     if (message != "") {
 
         QMessageBox::warning
             (this,
              tr("Failed to generate layer"),
-             tr("<b>Layer generation failed</b><p>Failed to generate derived layer.<p>The layer transform \"%1\" failed:<p>%2")
-             .arg(transformName).arg(message),
+             tr("<b>Layer generation failed</b><p>Failed to generate derived layer.<p>The layer transform %1failed:<p>%2")
+             .arg(quoted).arg(message),
              QMessageBox::Ok);
     } else {
         QMessageBox::warning
             (this,
              tr("Failed to generate layer"),
-             tr("<b>Layer generation failed</b><p>Failed to generate a derived layer.<p>The layer transform \"%1\" failed.<p>No error information is available.")
-             .arg(transformName),
+             tr("<b>Layer generation failed</b><p>Failed to generate a derived layer.<p>The layer transform %1failed.<p>No error information is available.")
+             .arg(quoted),
              QMessageBox::Ok);
     }
 }
@@ -4358,6 +4399,13 @@ MainWindow::showActivityLog()
     m_activityLog->show();
     m_activityLog->raise();
     m_activityLog->scrollToEnd();
+}
+
+void
+MainWindow::showUnitConverter()
+{
+    m_unitConverter->show();
+    m_unitConverter->raise();
 }
 
 void
@@ -4548,7 +4596,7 @@ MainWindow::about()
 #endif
 
     aboutText += 
-        "<p><small>Sonic Visualiser Copyright &copy; 2005&ndash;2013 Chris Cannam and "
+        "<p><small>Sonic Visualiser Copyright &copy; 2005&ndash;2015 Chris Cannam and "
         "Queen Mary, University of London.</small></p>"
         "<p><small>This program is free software; you can redistribute it and/or "
         "modify it under the terms of the GNU General Public License as "

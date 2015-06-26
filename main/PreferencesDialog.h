@@ -57,12 +57,14 @@ protected slots:
     void tempDirRootChanged(QString root);
     void backgroundModeChanged(int mode);
     void timeToTextModeChanged(int mode);
+    void showHMSChanged(int state);
     void octaveSystemChanged(int system);
     void viewFontSizeChanged(int sz);
     void showSplashChanged(int state);
     void defaultTemplateChanged(int);
     void localeChanged(int);
     void networkPermissionChanged(int state);
+    void retinaChanged(int state);
 
     void tempDirButtonClicked();
 
@@ -89,14 +91,16 @@ protected:
     int m_spectrogramSmoothing;
     int m_spectrogramXSmoothing;
     int m_propertyLayout;
-    float m_tuningFrequency;
+    double m_tuningFrequency;
     int m_audioDevice;
     int m_resampleQuality;
     bool m_resampleOnLoad;
     bool m_networkPermission;
+    bool m_retina;
     QString m_tempDirRoot;
     int m_backgroundMode;
     int m_timeToTextMode;
+    bool m_showHMS;
     int m_octaveSystem;
     int m_viewFontSize;
     bool m_showSplash;

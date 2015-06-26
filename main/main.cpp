@@ -14,12 +14,14 @@
 */
 
 #include "MainWindow.h"
+#include "SVSplash.h"
 
 #include "system/System.h"
 #include "system/Init.h"
 #include "base/TempDirectory.h"
 #include "base/PropertyContainer.h"
 #include "base/Preferences.h"
+#include "data/fileio/FileSource.h"
 #include "widgets/TipDialog.h"
 #include "widgets/InteractiveFileFinder.h"
 #include "svapp/framework/TransformUserConfigurator.h"
@@ -35,12 +37,9 @@
 #include <QIcon>
 #include <QSessionManager>
 #include <QDir>
-#include <QSplashScreen>
 #include <QTimer>
 #include <QPainter>
 #include <QFileOpenEvent>
-
-#include "../version.h"
 
 #include <iostream>
 #include <signal.h>
@@ -214,7 +213,7 @@ public:
         if (!success) manager.cancel();
     }
 
-    void handleFilepathArgument(QString path, QSplashScreen *splash);
+    void handleFilepathArgument(QString path, SVSplash *splash);
 
     bool m_readyForFiles;
     QStringList m_filepathQueue;
@@ -222,7 +221,6 @@ public:
 protected:
     MainWindow *m_mainWindow;
     bool event(QEvent *);
-
 };
 
 int
@@ -271,22 +269,15 @@ main(int argc, char **argv)
     QApplication::setOrganizationDomain("sonicvisualiser.org");
     QApplication::setApplicationName(QApplication::tr("Sonic Visualiser"));
 
-    QSplashScreen *splash = 0;
+    QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+
+    SVSplash *splash = 0;
 
     QSettings settings;
 
     settings.beginGroup("Preferences");
     if (settings.value("show-splash", true).toBool()) {
-        QPixmap pixmap(":/icons/sv-splash.png");
-        QPainter painter;
-        painter.begin(&pixmap);
-        QString text = QString("v%1").arg(SV_VERSION);
-        painter.drawText
-            (pixmap.width() - painter.fontMetrics().width(text) - 10,
-             10 + painter.fontMetrics().ascent(),
-             text);
-        painter.end();
-        splash = new QSplashScreen(pixmap);
+        splash = new SVSplash();
         splash->show();
         QTimer::singleShot(5000, splash, SLOT(hide()));
         application.processEvents();
@@ -350,6 +341,8 @@ main(int argc, char **argv)
     TransformUserConfigurator::setParentWidget(gui);
     if (splash) {
         QObject::connect(gui, SIGNAL(hideSplash()), splash, SLOT(hide()));
+        QObject::connect(gui, SIGNAL(hideSplash(QWidget *)),
+                         splash, SLOT(finishSplash(QWidget *)));
     }
 
     QDesktopWidget *desktop = QApplication::desktop();
@@ -417,15 +410,6 @@ main(int argc, char **argv)
     settings.endGroup();
 #endif
 
-    if (splash) splash->finish(gui);
-    delete splash;
-
-/*
-    TipDialog tipDialog;
-    if (tipDialog.isOK()) {
-        tipDialog.exec();
-    }
-*/
     int rv = application.exec();
 
     gui->hide();
@@ -457,6 +441,8 @@ main(int argc, char **argv)
     settings.endGroup();
 #endif
 
+    FileSource::debugReport();
+    
     delete gui;
 
     cleanupMutex.unlock();
@@ -487,7 +473,7 @@ bool SVApplication::event(QEvent *event){
 }
 
 /** Application-global handler for filepaths passed in, e.g. as command-line arguments or apple events */
-void SVApplication::handleFilepathArgument(QString path, QSplashScreen *splash){
+void SVApplication::handleFilepathArgument(QString path, SVSplash *splash){
     static bool haveSession = false;
     static bool haveMainModel = false;
     static bool havePriorCommandLineModel = false;
