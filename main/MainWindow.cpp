@@ -67,7 +67,6 @@
 #include "data/fileio/MIDIFileWriter.h"
 #include "data/fileio/BZipFileDevice.h"
 #include "data/fileio/FileSource.h"
-#include "data/fft/FFTDataServer.h"
 #include "data/midi/MIDIInput.h"
 #include "base/RecentFiles.h"
 #include "transform/TransformFactory.h"
@@ -461,7 +460,6 @@ MainWindow::setupFileMenu()
     IconLoader il;
 
     QIcon icon = il.load("filenew");
-    icon.addPixmap(il.loadPixmap("filenew-22"));
     QAction *action = new QAction(icon, tr("&New Session"), this);
     action->setShortcut(tr("Ctrl+N"));
     action->setStatusTip(tr("Abandon the current %1 session and start a new one").arg(QApplication::applicationName()));
@@ -471,7 +469,6 @@ MainWindow::setupFileMenu()
     toolbar->addAction(action);
 
     icon = il.load("fileopen");
-    icon.addPixmap(il.loadPixmap("fileopen-22"));
     action = new QAction(icon, tr("&Open..."), this);
     action->setShortcut(tr("Ctrl+O"));
     action->setStatusTip(tr("Open a session file, audio file, or layer"));
@@ -512,7 +509,6 @@ MainWindow::setupFileMenu()
     menu->addSeparator();
 
     icon = il.load("filesave");
-    icon.addPixmap(il.loadPixmap("filesave-22"));
     action = new QAction(icon, tr("&Save Session"), this);
     action->setShortcut(tr("Ctrl+S"));
     action->setStatusTip(tr("Save the current session into a %1 session file").arg(QApplication::applicationName()));
@@ -523,7 +519,6 @@ MainWindow::setupFileMenu()
     toolbar->addAction(action);
 	
     icon = il.load("filesaveas");
-    icon.addPixmap(il.loadPixmap("filesaveas-22"));
     action = new QAction(icon, tr("Save Session &As..."), this);
     action->setShortcut(tr("Ctrl+Shift+S"));
     action->setStatusTip(tr("Save the current session into a new %1 session file").arg(QApplication::applicationName()));
