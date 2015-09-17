@@ -57,7 +57,6 @@ HEADERS += \
 	bqvec/bqvec/VectorOps.h \
 	bqvec/pommier/neon_mathfun.h \
 	bqvec/pommier/sse_mathfun.h \
-	bqvec/test/TestVectorOps.h \
 	bqresample/bqresample/Resampler.h \
 	bqresample/speex/speex_resampler.h \
 	bqaudioio/bqaudioio/ApplicationPlaybackSource.h \
@@ -80,7 +79,6 @@ SOURCES += \
 	bqvec/src/Allocators.cpp \
 	bqvec/src/Barrier.cpp \
 	bqvec/src/VectorOpsComplex.cpp \
-	bqvec/test/TestVectorOps.cpp \
 	bqresample/src/Resampler.cpp \
 	bqaudioio/src/AudioFactory.cpp \
 	bqaudioio/src/JACKAudioIO.cpp \
