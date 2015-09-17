@@ -32,8 +32,7 @@ class MainWindow : public MainWindowBase
     Q_OBJECT
 
 public:
-    MainWindow(bool withAudioOutput = true,
-               bool withOSCSupport = true);
+    MainWindow(SoundOptions options, bool withOSCSupport = true);
     virtual ~MainWindow();
 
 signals:
@@ -132,6 +131,7 @@ protected slots:
     virtual void layerInAView(Layer *, bool);
 
     virtual void mainModelChanged(WaveFileModel *);
+    virtual void mainModelGainChanged(float);
     virtual void modelAdded(Model *);
     virtual void modelAboutToBeDeleted(Model *);
 
@@ -187,6 +187,7 @@ protected:
     QAction                 *m_ffwdSimilarAction;
     QAction                 *m_ffwdEndAction;
     QAction                 *m_playAction;
+    QAction                 *m_recordAction;
     QAction                 *m_playSelectionAction;
     QAction                 *m_playLoopAction;
     QAction                 *m_manageTemplatesAction;

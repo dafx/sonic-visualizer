@@ -57,10 +57,9 @@
 #include "widgets/LabelCounterInputDialog.h"
 #include "widgets/ActivityLog.h"
 #include "widgets/UnitConverter.h"
-#include "audioio/AudioCallbackPlaySource.h"
-#include "audioio/AudioCallbackPlayTarget.h"
-#include "audioio/AudioTargetFactory.h"
-#include "audioio/PlaySpeedRangeMapper.h"
+#include "audio/AudioCallbackPlaySource.h"
+#include "audio/AudioRecordTarget.h"
+#include "audio/PlaySpeedRangeMapper.h"
 #include "data/fileio/DataFileReaderFactory.h"
 #include "data/fileio/PlaylistFileReader.h"
 #include "data/fileio/WavFileWriter.h"
@@ -68,7 +67,6 @@
 #include "data/fileio/MIDIFileWriter.h"
 #include "data/fileio/BZipFileDevice.h"
 #include "data/fileio/FileSource.h"
-#include "data/fft/FFTDataServer.h"
 #include "data/midi/MIDIInput.h"
 #include "base/RecentFiles.h"
 #include "transform/TransformFactory.h"
@@ -93,6 +91,9 @@
 #include <vamp-hostsdk/PluginBase.h>
 #include "plugin/api/ladspa.h"
 #include "plugin/api/dssi.h"
+
+#include <bqaudioio/SystemPlaybackTarget.h>
+#include <bqaudioio/SystemAudioIO.h>
 
 #include <QApplication>
 #include <QMessageBox>
@@ -130,8 +131,8 @@ using std::map;
 using std::set;
 
 
-MainWindow::MainWindow(bool withAudioOutput, bool withOSCSupport) :
-    MainWindowBase(withAudioOutput, true),
+MainWindow::MainWindow(SoundOptions options, bool withOSCSupport) :
+    MainWindowBase(options),
     m_overview(0),
     m_mainMenusCreated(false),
     m_paneMenu(0),
@@ -155,6 +156,7 @@ MainWindow::MainWindow(bool withAudioOutput, bool withOSCSupport) :
     m_ffwdSimilarAction(0),
     m_ffwdEndAction(0),
     m_playAction(0),
+    m_recordAction(0),
     m_playSelectionAction(0),
     m_playLoopAction(0),
     m_soloModified(false),
@@ -236,15 +238,15 @@ MainWindow::MainWindow(bool withAudioOutput, bool withOSCSupport) :
 
     m_playSpeed = new AudioDial(frame);
     m_playSpeed->setMinimum(0);
-    m_playSpeed->setMaximum(200);
-    m_playSpeed->setValue(100);
+    m_playSpeed->setMaximum(120);
+    m_playSpeed->setValue(60);
     m_playSpeed->setFixedWidth(32);
     m_playSpeed->setFixedHeight(32);
     m_playSpeed->setNotchesVisible(true);
     m_playSpeed->setPageStep(10);
-    m_playSpeed->setObjectName(tr("Playback Speedup"));
-    m_playSpeed->setDefaultValue(100);
-    m_playSpeed->setRangeMapper(new PlaySpeedRangeMapper(0, 200));
+    m_playSpeed->setObjectName(tr("Playback Speed"));
+    m_playSpeed->setRangeMapper(new PlaySpeedRangeMapper);
+    m_playSpeed->setDefaultValue(60);
     m_playSpeed->setShowToolTip(true);
     connect(m_playSpeed, SIGNAL(valueChanged(int)),
 	    this, SLOT(playSpeedChanged(int)));
@@ -565,10 +567,12 @@ MainWindow::setupFileMenu()
     m_keyReference->registerShortcut(action);
     menu->addAction(action);
 
-    action = new QAction(tr("Export Annotation Layer..."), this);
+    action = new QAction(tr("Export Annotation La&yer..."), this);
+    action->setShortcut(tr("Ctrl+Y"));
     action->setStatusTip(tr("Export layer data to a file"));
     connect(action, SIGNAL(triggered()), this, SLOT(exportLayer()));
     connect(this, SIGNAL(canExportLayer(bool)), action, SLOT(setEnabled(bool)));
+    m_keyReference->registerShortcut(action);
     menu->addAction(action);
 
     menu->addSeparator();
@@ -1979,6 +1983,17 @@ MainWindow::setupToolbars()
     connect(m_ffwdEndAction, SIGNAL(triggered()), this, SLOT(ffwdEnd()));
     connect(this, SIGNAL(canPlay(bool)), m_ffwdEndAction, SLOT(setEnabled(bool)));
 
+    m_recordAction = toolbar->addAction(il.load("record"),
+                                        tr("Record"));
+    m_recordAction->setCheckable(true);
+    m_recordAction->setShortcut(tr("Ctrl+Space"));
+    m_recordAction->setStatusTip(tr("Record a new audio file"));
+    connect(m_recordAction, SIGNAL(triggered()), this, SLOT(record()));
+    connect(m_recordTarget, SIGNAL(recordStatusChanged(bool)),
+	    m_recordAction, SLOT(setChecked(bool)));
+    connect(this, SIGNAL(canRecord(bool)),
+            m_recordAction, SLOT(setEnabled(bool)));
+
     toolbar = addToolBar(tr("Play Mode Toolbar"));
 
     m_playSelectionAction = toolbar->addAction(il.load("playselection"),
@@ -2029,6 +2044,7 @@ MainWindow::setupToolbars()
     }
 
     m_keyReference->registerShortcut(m_playAction);
+    m_keyReference->registerShortcut(m_recordAction);
     m_keyReference->registerShortcut(m_playSelectionAction);
     m_keyReference->registerShortcut(m_playLoopAction);
     m_keyReference->registerShortcut(m_soloAction);
@@ -2055,6 +2071,8 @@ MainWindow::setupToolbars()
     menu->addAction(m_rwdStartAction);
     menu->addAction(m_ffwdEndAction);
     menu->addSeparator();
+    menu->addAction(m_recordAction);
+    menu->addSeparator();
 
     m_rightButtonPlaybackMenu->addAction(m_playAction);
     m_rightButtonPlaybackMenu->addAction(m_playSelectionAction);
@@ -2067,6 +2085,8 @@ MainWindow::setupToolbars()
     m_rightButtonPlaybackMenu->addSeparator();
     m_rightButtonPlaybackMenu->addAction(m_rwdStartAction);
     m_rightButtonPlaybackMenu->addAction(m_ffwdEndAction);
+    m_rightButtonPlaybackMenu->addSeparator();
+    m_rightButtonPlaybackMenu->addAction(m_recordAction);
     m_rightButtonPlaybackMenu->addSeparator();
 
     QAction *fastAction = menu->addAction(tr("Speed Up"));
@@ -2274,7 +2294,7 @@ MainWindow::updateMenuStates()
         (haveCurrentPane &&
          (currentLayer != 0));
     bool havePlayTarget =
-	(m_playTarget != 0);
+	(m_playTarget != 0 || m_audioIO != 0);
     bool haveSelection = 
 	(m_viewManager &&
 	 !m_viewManager->getSelections().empty());
@@ -3868,26 +3888,38 @@ MainWindow::alignToggled()
 void
 MainWindow::playSpeedChanged(int position)
 {
-    PlaySpeedRangeMapper mapper(0, 200);
+    PlaySpeedRangeMapper mapper;
 
     double percent = m_playSpeed->mappedValue();
     double factor = mapper.getFactorForValue(percent);
 
-//    cerr << "speed = " << position << " percent = " << percent << " factor = " << factor << endl;
+//    cerr << "play speed position = " << position << " (range 0-120) percent = " << percent << " factor = " << factor << endl;
 
-    bool something = (position != 100);
+    int centre = m_playSpeed->defaultValue();
 
-    int pc = int(lrint(percent));
+    // Percentage is shown to 0dp if >100, to 1dp if <100; factor is
+    // shown to 3sf
 
-    if (!something) {
+    char pcbuf[30];
+    char facbuf[30];
+    
+    if (position == centre) {
         contextHelpChanged(tr("Playback speed: Normal"));
+    } else if (position < centre) {
+        sprintf(pcbuf, "%.1f", percent);
+        sprintf(facbuf, "%.3g", 1.0 / factor);
+        contextHelpChanged(tr("Playback speed: %1% (%2x slower)")
+                           .arg(pcbuf)
+                           .arg(facbuf));
     } else {
-        contextHelpChanged(tr("Playback speed: %1%2%")
-                           .arg(position > 100 ? "+" : "")
-                           .arg(pc));
+        sprintf(pcbuf, "%.0f", percent);
+        sprintf(facbuf, "%.3g", factor);
+        contextHelpChanged(tr("Playback speed: %1% (%2x faster)")
+                           .arg(pcbuf)
+                           .arg(facbuf));
     }
 
-    m_playSource->setTimeStretch(factor);
+    m_playSource->setTimeStretch(1.0 / factor); // factor is a speedup
 
     updateMenuStates();
 }
@@ -4219,9 +4251,19 @@ MainWindow::mainModelChanged(WaveFileModel *model)
 
     MainWindowBase::mainModelChanged(model);
 
-    if (m_playTarget) {
+    if (m_playTarget || m_audioIO) {
         connect(m_fader, SIGNAL(valueChanged(float)),
-                m_playTarget, SLOT(setOutputGain(float)));
+                this, SLOT(mainModelGainChanged(float)));
+    }
+}
+
+void
+MainWindow::mainModelGainChanged(float gain)
+{
+    if (m_playTarget) {
+        m_playTarget->setOutputGain(gain);
+    } else if (m_audioIO) {
+        m_audioIO->setOutputGain(gain);
     }
 }
 
@@ -4290,20 +4332,25 @@ MainWindow::modelGenerationFailed(QString transformName, QString message)
 {
     emit hideSplash();
 
+    QString quoted;
+    if (transformName != "") {
+        quoted = QString("\"%1\" ").arg(transformName);
+    }
+    
     if (message != "") {
 
         QMessageBox::warning
             (this,
              tr("Failed to generate layer"),
-             tr("<b>Layer generation failed</b><p>Failed to generate derived layer.<p>The layer transform \"%1\" failed:<p>%2")
-             .arg(transformName).arg(message),
+             tr("<b>Layer generation failed</b><p>Failed to generate derived layer.<p>The layer transform %1failed:<p>%2")
+             .arg(quoted).arg(message),
              QMessageBox::Ok);
     } else {
         QMessageBox::warning
             (this,
              tr("Failed to generate layer"),
-             tr("<b>Layer generation failed</b><p>Failed to generate a derived layer.<p>The layer transform \"%1\" failed.<p>No error information is available.")
-             .arg(transformName),
+             tr("<b>Layer generation failed</b><p>Failed to generate a derived layer.<p>The layer transform %1failed.<p>No error information is available.")
+             .arg(quoted),
              QMessageBox::Ok);
     }
 }
@@ -4590,7 +4637,7 @@ MainWindow::about()
 #endif
 
     aboutText += 
-        "<p><small>Sonic Visualiser Copyright &copy; 2005&ndash;2013 Chris Cannam and "
+        "<p><small>Sonic Visualiser Copyright &copy; 2005&ndash;2015 Chris Cannam and "
         "Queen Mary, University of London.</small></p>"
         "<p><small>This program is free software; you can redistribute it and/or "
         "modify it under the terms of the GNU General Public License as "
